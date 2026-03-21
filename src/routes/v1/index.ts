@@ -3,6 +3,9 @@ import projectRoute from './project.route';
 import authRoute from './auth.route';
 import userRoute from './user.route';
 import dashboardRoute from './dashboard.route';
+import messageRoute from './message.route';
+import meetingRoute from './meeting.route';
+import callRoute from './call.route';
 
 const router = express.Router();
 
@@ -11,6 +14,9 @@ const defaultRoutes = [
   { path: '/users', route: userRoute },
   { path: '/projects', route: projectRoute },
   { path: '/dashboard', route: dashboardRoute },
+  { path: '/messages', route: messageRoute },
+  { path: '/meetings', route: meetingRoute },
+  { path: '/calls', route: callRoute },
 ];
 
 defaultRoutes.forEach((route) => {

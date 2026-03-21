@@ -7,7 +7,17 @@ import ApiError from '../utils/ApiError';
 export const getUsers = catchAsync(async (req: Request, res: Response) => {
   const limit = Math.min(Number(req.query.limit) || 20, 100);
   const skip = Number(req.query.skip) || 0;
-  const result = await userService.queryUsers({}, { limit, skip });
+  const search = req.query.search as string;
+  
+  const filter: any = {};
+  if (search) {
+    filter.$or = [
+      { name: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+    ];
+  }
+
+  const result = await userService.queryUsers(filter, { limit, skip });
   res.send(result);
 });
 

@@ -12,6 +12,7 @@ export interface IUser extends Document {
   provider: string;
   providerId?: string;
   avatar?: string;
+  phoneNumber?: string;
   comparePassword(password: string): Promise<boolean>;
 }
 
@@ -66,6 +67,15 @@ const userSchema: Schema<IUser> = new Schema(
     },
     avatar: {
       type: String,
+    },
+    phoneNumber: {
+      type: String,
+      trim: true,
+      validate(value: string) {
+        if (value && !validator.isMobilePhone(value)) {
+          throw new Error('Invalid phone number');
+        }
+      },
     },
   },
   {

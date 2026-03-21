@@ -1,19 +1,30 @@
 import mongoose from 'mongoose';
-import app from './app';
+import app, { apolloServer, mountGraphQL, httpServer } from './app';
 import { config } from './config';
 import logger from './utils/logger';
+import { initSocket } from './utils/socket';
 
-mongoose.set('debug', true);
+mongoose.set('debug', config.env === 'development');
 
 const startServer = async () => {
   try {
-    console.log('--- STARTING SERVER ---');
-    console.log('Connecting to MongoDB...');
+    logger.info('Starting server initialization...');
+    
+    // Connect to MongoDB
     await mongoose.connect(config.mongoose.url, config.mongoose.options);
-    console.log('Connected to MongoDB');
+    logger.info('Connected to MongoDB');
 
-    const server = app.listen(config.port, () => {
-      console.log(`Server listening on port ${config.port} [${config.env}]`);
+    // Initialize Apollo Server 4
+    await apolloServer.start();
+    await mountGraphQL();
+    logger.info('Apollo GraphQL server started');
+
+    // Initialize Socket.io
+    initSocket();
+    logger.info('Socket.io initialized');
+
+    const server = httpServer.listen(config.port, () => {
+      logger.info(`Server listening on port ${config.port} [${config.env}]`);
     });
 
     const exitHandler = () => {
@@ -35,14 +46,10 @@ const startServer = async () => {
     process.on('uncaughtException', unexpectedErrorHandler);
     process.on('unhandledRejection', unexpectedErrorHandler);
 
+    // Graceful shutdown
     process.on('SIGTERM', () => {
-      logger.info('SIGTERM received — shutting down gracefully');
+      logger.info('SIGTERM received — shutting down');
       if (server) server.close();
-    });
-
-    process.on('SIGINT', () => {
-      logger.info('SIGINT received — shutting down gracefully');
-      if (server) server.close(() => process.exit(0));
     });
 
   } catch (error) {
