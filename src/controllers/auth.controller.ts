@@ -130,13 +130,9 @@ export const resendOtpHandler = catchAsync(async (req: Request, res: Response) =
 
   if (otpPurpose === OtpPurpose.EMAIL_VERIFICATION) {
     const user = await User.findOne({ email: email.toLowerCase().trim() });
-    sendOtpEmail(email, user?.name || 'User', otp).catch((err) =>
-      logger.error('Resend OTP email failed', { error: err.message })
-    );
+    await sendOtpEmail(email, user?.name || 'User', otp);
   } else {
-    sendPasswordResetOtpEmail(email, otp).catch((err) =>
-      logger.error('Resend reset OTP email failed', { error: err.message })
-    );
+    await sendPasswordResetOtpEmail(email, otp);
   }
 
   logger.info(`OTP resent for ${email} (${purpose})`);
@@ -220,10 +216,8 @@ export const forgotPassword = catchAsync(async (req: Request, res: Response) => 
   if (user) {
     try {
       const otp = await createOtp(user.email, OtpPurpose.PASSWORD_RESET);
-      sendPasswordResetOtpEmail(user.email, otp).catch((err) =>
-        logger.error('Reset OTP email failed', { error: err.message })
-      );
-      logger.info(`Password reset OTP requested for: ${user.email}`);
+      await sendPasswordResetOtpEmail(user.email, otp);
+      logger.info(`Password reset OTP requested and sent for: ${user.email}`);
     } catch (err: any) {
       // If rate limited, still return generic message
       if (err.statusCode === httpStatus.TOO_MANY_REQUESTS) {

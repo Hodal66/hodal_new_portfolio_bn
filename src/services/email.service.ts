@@ -3,12 +3,16 @@ import { config } from '../config';
 import logger from '../utils/logger';
 
 const transport = nodemailer.createTransport({
+  service: 'gmail',
   host: config.email.smtp.host,
   port: config.email.smtp.port,
   secure: config.email.smtp.secure,
   auth: {
     user: config.email.smtp.auth.user,
     pass: config.email.smtp.auth.pass,
+  },
+  tls: {
+    rejectUnauthorized: false, // Helps in some restricted environments
   },
 });
 
