@@ -43,7 +43,7 @@ const generateAndQueueOtpEmail = async (
   email: string,
   purpose: OtpPurpose,
   sendFn: (otp: string) => Promise<void>
-): Promise<void> => {
+): Promise<string> => {
   const otp = await createOtp(email, purpose);
 
   // Always log OTP in non-production for easy dev testing
@@ -56,6 +56,8 @@ const generateAndQueueOtpEmail = async (
       purpose,
     });
   });
+
+  return otp;
 };
 
 // ─────────────────────── REGISTRATION — Step 1: Submit Form ───────────────────────
@@ -65,7 +67,7 @@ export const register = catchAsync(async (req: Request, res: Response) => {
   const user = await createUser(req.body);
 
   // Generate OTP — fire-and-forget email (response is not blocked by email sending)
-  await generateAndQueueOtpEmail(
+  const otp = await generateAndQueueOtpEmail(
     user.email,
     OtpPurpose.EMAIL_VERIFICATION,
     (otp) => sendOtpEmail(user.email, user.name, otp)
@@ -88,6 +90,7 @@ export const register = catchAsync(async (req: Request, res: Response) => {
   res.status(httpStatus.CREATED).json({
     message: 'Registration successful. Please check your email for the verification code.',
     email: user.email,
+    ...(config.env !== 'production' ? { devOtp: otp } : {}),
   });
 });
 
@@ -139,6 +142,7 @@ export const resendOtpHandler = catchAsync(async (req: Request, res: Response) =
       ? OtpPurpose.PASSWORD_RESET
       : OtpPurpose.EMAIL_VERIFICATION;
 
+  let otp;
   // For email verification: check the user exists and is not already active
   if (otpPurpose === OtpPurpose.EMAIL_VERIFICATION) {
     const user = await User.findOne({ email: email.toLowerCase().trim() });
@@ -153,14 +157,14 @@ export const resendOtpHandler = catchAsync(async (req: Request, res: Response) =
     }
 
     // Generate OTP and send verification email asynchronously
-    await generateAndQueueOtpEmail(
+    otp = await generateAndQueueOtpEmail(
       email,
       OtpPurpose.EMAIL_VERIFICATION,
       (otp) => sendOtpEmail(email, user.name, otp)
     );
   } else {
     // Password reset resend — exact same pattern as forgotPassword
-    await generateAndQueueOtpEmail(
+    otp = await generateAndQueueOtpEmail(
       email,
       OtpPurpose.PASSWORD_RESET,
       (otp) => sendPasswordResetOtpEmail(email, otp)
@@ -171,6 +175,7 @@ export const resendOtpHandler = catchAsync(async (req: Request, res: Response) =
 
   res.status(httpStatus.OK).json({
     message: 'If an account with that email exists, a new OTP has been sent.',
+    ...(config.env !== 'production' ? { devOtp: otp } : {}),
   });
 });
 
@@ -182,13 +187,11 @@ export const login = catchAsync(async (req: Request, res: Response) => {
 
   // If account is unverified, resend OTP automatically
   if (user.status === 'pending') {
-    // Fire-and-forget — don't block the login response
-    generateAndQueueOtpEmail(
+    // Generate code synchronously so we can return it in the response for dev mode
+    const otp = await generateAndQueueOtpEmail(
       user.email,
       OtpPurpose.EMAIL_VERIFICATION,
       (otp) => sendOtpEmail(user.email, user.name, otp)
-    ).catch((err) =>
-      logger.error('Auto-resend OTP on login failed', { error: err.message })
     );
 
     return res.status(httpStatus.FORBIDDEN).json({
@@ -196,6 +199,7 @@ export const login = catchAsync(async (req: Request, res: Response) => {
         'Your account is not verified. A new verification code has been sent to your email.',
       email: user.email,
       requiresVerification: true,
+      ...(config.env !== 'production' ? { devOtp: otp } : {}),
     });
   }
 
@@ -254,12 +258,16 @@ export const forgotPassword = catchAsync(async (req: Request, res: Response) => 
     try {
       // ★ KEY FIX: Generate OTP synchronously (must complete before responding)
       //   but send the email asynchronously (fire-and-forget)
-      await generateAndQueueOtpEmail(
+      const otp = await generateAndQueueOtpEmail(
         user.email,
         OtpPurpose.PASSWORD_RESET,
         (otp) => sendPasswordResetOtpEmail(user.email, otp)
       );
-      logger.info(`Password reset OTP generated and queued for: ${user.email}`);
+      
+      return res.status(httpStatus.OK).json({
+        message: 'If an account with that email exists, a password reset code has been sent.',
+        ...(config.env !== 'production' ? { devOtp: otp } : {}),
+      });
     } catch (err: any) {
       if (err.statusCode === httpStatus.TOO_MANY_REQUESTS) {
         // Rate limit hit — still return generic message to prevent enumeration

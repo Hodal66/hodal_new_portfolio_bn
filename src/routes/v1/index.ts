@@ -6,6 +6,7 @@ import dashboardRoute from './dashboard.route';
 import messageRoute from './message.route';
 import meetingRoute from './meeting.route';
 import callRoute from './call.route';
+import seoRoute from './seo.route';
 
 const router = express.Router();
 
@@ -17,6 +18,7 @@ const defaultRoutes = [
   { path: '/messages', route: messageRoute },
   { path: '/meetings', route: meetingRoute },
   { path: '/calls', route: callRoute },
+  { path: '/seo', route: seoRoute },
 ];
 
 defaultRoutes.forEach((route) => {

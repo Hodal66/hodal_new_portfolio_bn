@@ -41,6 +41,9 @@ export interface IProject extends Document {
   };
   featured: boolean;
   order: number;
+  // Timestamps
+  updatedAt?: Date;
+  createdAt?: Date;
   // Localized fields
   titleFr?: string; titleSw?: string; titleRw?: string;
   subtitleFr?: string; subtitleSw?: string; subtitleRw?: string;
