@@ -49,10 +49,10 @@ const testEmail = async () => {
         console.log('Message ID:', info.messageId);
         console.log('----------------------------');
         console.log('IMPORTANT: If you dont see it in your inbox, check SPAM folder.');
-    } catch (error) {
+    } catch (err: any) {
         console.error('❌ Diagnostic Failed!');
-        console.error('Error Details:', error.message);
-        if (isGmail && error.message.includes('Invalid login')) {
+        console.error('Error Details:', err.message);
+        if (isGmail && err.message.includes('Invalid login')) {
             console.log('\n💡 HINT: For Gmail, ensure you are using an "App Password".');
             console.log('Go to: https://myaccount.google.com/apppasswords');
         }

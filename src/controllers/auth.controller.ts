@@ -24,6 +24,7 @@ import Token, { TokenType } from '../models/token.model';
 import User from '../models/user.model';
 import ApiError from '../utils/ApiError';
 import logger from '../utils/logger';
+import { config } from '../config';
 
 // ─────────────────────── Helpers ───────────────────────
 
