@@ -137,5 +137,15 @@ projectSchema.statics.isProjectNameTaken = async function (title: string, exclud
   return !!project;
 };
 
+projectSchema.pre('validate', function (next) {
+  if (this.title && !this.slug) {
+    this.slug = this.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+  }
+  next();
+});
+
 const Project = mongoose.model<IProject, Model<IProject>>('Project', projectSchema) as any;
 export default Project;

@@ -2,7 +2,7 @@ import Joi from 'joi';
 
 export const createProjectSchema = Joi.object({
   title: Joi.string().min(2).max(120).required(),
-  slug: Joi.string().min(2).max(120).lowercase().required(),
+  slug: Joi.string().min(2).max(120).lowercase().optional(),
   description: Joi.string().min(10).required(),
   subtitle: Joi.string().max(200).optional(),
   category: Joi.string().optional(),
@@ -26,11 +26,11 @@ export const createProjectSchema = Joi.object({
   metrics: Joi.object().optional(),
   lessons: Joi.array().items(Joi.string()).optional(),
   links: Joi.object({
-    github: Joi.string().uri().optional().allow(''),
-    live: Joi.string().uri().optional().allow(''),
-    demo: Joi.string().uri().optional().allow(''),
-    docs: Joi.string().uri().optional().allow(''),
-    company: Joi.string().uri().optional().allow(''),
+    github: Joi.string().optional().allow(''),
+    live: Joi.string().optional().allow(''),
+    demo: Joi.string().optional().allow(''),
+    docs: Joi.string().optional().allow(''),
+    company: Joi.string().optional().allow(''),
   }).optional(),
   featured: Joi.boolean().optional(),
   order: Joi.number().optional(),
