@@ -3,6 +3,7 @@ import { config } from '../config';
 import logger from '../utils/logger';
 
 const transport = nodemailer.createTransport({
+  pool: true, // Reuse SMTP connections for faster delivery
   service: 'gmail',
   host: config.email.smtp.host,
   port: config.email.smtp.port,
@@ -12,7 +13,7 @@ const transport = nodemailer.createTransport({
     pass: config.email.smtp.auth.pass,
   },
   tls: {
-    rejectUnauthorized: false, // Helps in some restricted environments
+    rejectUnauthorized: false,
   },
 });
 
@@ -79,15 +80,24 @@ export const sendOtpEmail = async (to: string, name: string, otp: string) => {
   const subject = 'Verify Your Email — Hodaltech';
   const text = `Hi ${name},\n\nYour verification code is: ${otp}\n\nThis code expires in 5 minutes.\n\nIf you did not create an account, please ignore this email.\n\nBest regards,\nHodaltech Team`;
   const html = `
-    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;background:#f9fafb;border-radius:16px;">
-      <h2 style="color:#3b82f6;text-align:center;">Verify Your Email</h2>
-      <p style="text-align:center;color:#374151;">Hi <strong>${name}</strong>, use the code below to verify your email address:</p>
-      <div style="text-align:center;margin:24px 0;">
-        <span style="display:inline-block;background:linear-gradient(135deg,#3b82f6,#06b6d4);color:#fff;font-size:32px;font-weight:bold;letter-spacing:12px;padding:16px 32px;border-radius:12px;">${otp}</span>
+    <div style="font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:600px;margin:20px auto;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,0.05);border:1px solid #f1f5f9;">
+      <div style="background:#3b82f6;padding:32px 24px;text-align:center;">
+        <h1 style="color:#fff;margin:0;font-size:24px;letter-spacing:2px;font-weight:800;">HODALTECH</h1>
       </div>
-      <p style="text-align:center;color:#6b7280;font-size:14px;">This code expires in <strong>5 minutes</strong>.</p>
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;" />
-      <p style="color:#9ca3af;font-size:12px;text-align:center;">If you did not create an account, you can safely ignore this email.</p>
+      <div style="padding:40px 32px;">
+        <h2 style="color:#1e293b;margin:0 0 16px 0;font-size:22px;text-align:center;">Verify Your Identity</h2>
+        <p style="text-align:center;color:#64748b;font-size:16px;line-height:1.6;">Hi <strong>${name}</strong>, use the secure code below to complete your registration:</p>
+        <div style="text-align:center;margin:32px 0;">
+          <div style="display:inline-block;background:#f8fafc;border:2px dashed #cbd5e1;padding:20px 40px;border-radius:16px;">
+            <span style="color:#3b82f6;font-size:36px;font-weight:800;letter-spacing:10px;font-family:monospace;">${otp}</span>
+          </div>
+        </div>
+        <p style="text-align:center;color:#ef4444;font-size:14px;font-weight:600;margin:0;">Expires in 5 minutes</p>
+      </div>
+      <div style="background:#f8fafc;padding:24px;text-align:center;border-top:1px solid #f1f5f9;">
+        <p style="color:#94a3b8;font-size:12px;margin:0;">If you did not request this code, you can safely ignore this email.</p>
+        <p style="color:#94a3b8;font-size:12px;margin:8px 0 0 0;">&copy; 2026 Hodaltech. Secure Authentication System.</p>
+      </div>
     </div>
   `;
   await sendEmail(to, subject, text, html);
@@ -100,15 +110,24 @@ export const sendPasswordResetOtpEmail = async (to: string, otp: string) => {
   const subject = 'Password Reset Code — Hodaltech';
   const text = `Your password reset code is: ${otp}\n\nThis code expires in 5 minutes.\n\nIf you did not request this, please ignore this email.`;
   const html = `
-    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;background:#f9fafb;border-radius:16px;">
-      <h2 style="color:#3b82f6;text-align:center;">Reset Your Password</h2>
-      <p style="text-align:center;color:#374151;">Enter the code below to reset your password:</p>
-      <div style="text-align:center;margin:24px 0;">
-        <span style="display:inline-block;background:linear-gradient(135deg,#3b82f6,#06b6d4);color:#fff;font-size:32px;font-weight:bold;letter-spacing:12px;padding:16px 32px;border-radius:12px;">${otp}</span>
+    <div style="font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:600px;margin:20px auto;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,0.05);border:1px solid #f1f5f9;">
+      <div style="background:#3b82f6;padding:32px 24px;text-align:center;">
+        <h1 style="color:#fff;margin:0;font-size:24px;letter-spacing:2px;font-weight:800;">HODALTECH</h1>
       </div>
-      <p style="text-align:center;color:#6b7280;font-size:14px;">This code expires in <strong>5 minutes</strong>.</p>
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;" />
-      <p style="color:#9ca3af;font-size:12px;text-align:center;">If you did not request a password reset, you can safely ignore this email.</p>
+      <div style="padding:40px 32px;">
+        <h2 style="color:#1e293b;margin:0 0 16px 0;font-size:22px;text-align:center;">Reset Your Password</h2>
+        <p style="text-align:center;color:#64748b;font-size:16px;line-height:1.6;">Someone requested a password reset for your account. Use this code to continue:</p>
+        <div style="text-align:center;margin:32px 0;">
+          <div style="display:inline-block;background:#fefce8;border:2px dashed #facc15;padding:20px 40px;border-radius:16px;">
+            <span style="color:#854d0e;font-size:36px;font-weight:800;letter-spacing:10px;font-family:monospace;">${otp}</span>
+          </div>
+        </div>
+        <p style="text-align:center;color:#ef4444;font-size:14px;font-weight:600;margin:0;">Expires in 5 minutes</p>
+      </div>
+      <div style="background:#f8fafc;padding:24px;text-align:center;border-top:1px solid #f1f5f9;">
+        <p style="color:#94a3b8;font-size:12px;margin:0;">If you did not request a password reset, you can safely ignore this email.</p>
+        <p style="color:#94a3b8;font-size:12px;margin:8px 0 0 0;">&copy; 2026 Hodaltech. Secure Authentication System.</p>
+      </div>
     </div>
   `;
   await sendEmail(to, subject, text, html);

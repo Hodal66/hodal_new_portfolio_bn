@@ -10,7 +10,7 @@ const OTP_LENGTH = 6;
 const OTP_EXPIRY_MINUTES = 5;
 const MAX_VERIFICATION_ATTEMPTS = 5;
 const MAX_RESENDS_PER_HOUR = 3;
-const BCRYPT_ROUNDS = 10;
+const BCRYPT_ROUNDS = 6; // Optimized for speed while maintaining safety for short-lived codes
 
 /**
  * Generate a cryptographically secure 6-digit OTP
