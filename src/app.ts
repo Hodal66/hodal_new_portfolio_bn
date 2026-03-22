@@ -57,8 +57,9 @@ app.use(compression());
 
 const allowedOrigins = [
   config.frontendUrl,
-  'https://hodal-new-portfolio.onrender.com', // Potential production frontend
-  'https://hodal-new-portfolio-bn.onrender.com' // Self-reference for internal calls
+  'https://www.hodaltech.space',
+  'https://hodal-new-portfolio.onrender.com', // Potential fallback
+  'https://hodal-new-portfolio-bn.onrender.com'
 ];
 
 if (config.env === 'development') {
@@ -69,17 +70,18 @@ if (config.env === 'development') {
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
     
-    // Check if origin is allowed or matches our onrender.com pattern
+    // Check if origin is allowed or matches our authorized patterns
     const isAllowed = allowedOrigins.includes(origin) || 
-                      origin.endsWith('.onrender.com');
+                      origin.endsWith('.onrender.com') ||
+                      origin.endsWith('.hodaltech.space');
                       
     if (isAllowed) {
       callback(null, true);
     } else {
-      callback(new Error(`Origin ${origin} not allowed by CORS`));
+      // Don't throw a new Error to avoid 500 status on preflight
+      callback(null, false);
     }
   },
   credentials: true,
