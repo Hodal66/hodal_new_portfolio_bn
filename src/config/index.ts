@@ -21,6 +21,7 @@ const envVarsSchema = Joi.object()
     EMAIL_SECURE: Joi.string().default('false'),
     ENABLE_EMAIL_NOTIFICATIONS: Joi.string().default('false'),
     ADMIN_EMAILS: Joi.string().allow('').default(''),
+    HodalTechGridAPIKey: Joi.string().description('SendGrid API Key'),
     CLOUDINARY_CLOUD_NAME: Joi.string().required(),
     CLOUDINARY_API_KEY: Joi.string().required(),
     CLOUDINARY_API_SECRET: Joi.string().required(),
@@ -78,6 +79,7 @@ export const config = {
       env === 'production'
         ? envVars.ENABLE_EMAIL_NOTIFICATIONS === 'true'
         : true,
+    sendgridApiKey: envVars.HodalTechGridAPIKey,
   },
 
   otp: {

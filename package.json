@@ -16,6 +16,7 @@
   "dependencies": {
     "@apollo/server": "^4.11.0",
     "@graphql-tools/schema": "^10.0.3",
+    "@sendgrid/mail": "^8.1.6",
     "@types/uuid": "^10.0.0",
     "bcrypt": "^6.0.0",
     "body-parser": "^2.2.2",
