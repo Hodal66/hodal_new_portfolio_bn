@@ -7,11 +7,19 @@ import * as notificationService from '../services/notification.service';
 import * as fileService from '../services/file.service';
 import ApiError from '../utils/ApiError';
 
+import { sendContactNotification } from '../services/email.service';
+
 /**
  * Submit contact form
  */
 export const submitContact = catchAsync(async (req, res) => {
   const message = await contactService.submitContactMessage(req.body);
+  
+  // Notify admin and confirm to user asynchronously
+  sendContactNotification(req.body).catch(err => {
+    console.error('Unified Contact Notification Failed:', err);
+  });
+
   res.status(httpStatus.CREATED).send(message);
 });
 
