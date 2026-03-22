@@ -137,6 +137,11 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
+// ── SEO Handlers (Root Level Visibility) ──────────────────
+import * as seoController from './controllers/seo.controller';
+app.get('/sitemap.xml', seoController.getSitemap);
+app.get('/robots.txt', seoController.getRobots);
+
 // API Routes
 app.use('/v1', routes);
 
