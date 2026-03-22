@@ -241,3 +241,13 @@ export const emitMessage = (userId: string, data: any) => {
     io.to(userId).emit('message', data);
   }
 };
+
+/**
+ * Emit a call event to a specific user
+ */
+export const emitCall = (recipientId: string, data: any) => {
+  if (io) {
+    io.to(recipientId).emit('incoming-call', data);
+  }
+};
+

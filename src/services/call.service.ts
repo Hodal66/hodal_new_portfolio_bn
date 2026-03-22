@@ -1,15 +1,29 @@
 import CallLog, { ICallLog } from '../models/callLog.model';
+import User from '../models/user.model';
+import { emitCall } from '../utils/socket';
 
 /**
  * Log a new call attempt
  */
 export const initiateCall = async (callerId: string, receiverId: string, type: 'voice' | 'video' = 'voice') => {
-  return CallLog.create({
+  const call = await CallLog.create({
     caller: callerId,
     receiver: receiverId,
     type,
     status: 'ongoing',
   });
+
+  const populatedCall = await call.populate('caller', 'name avatar');
+  
+  // Real-time notification to the receiver
+  emitCall(receiverId, {
+    callId: call._id,
+    caller: populatedCall.caller,
+    type,
+    timestamp: new Date().toISOString(),
+  });
+
+  return populatedCall;
 };
 
 /**

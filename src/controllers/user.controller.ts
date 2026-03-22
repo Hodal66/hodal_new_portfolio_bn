@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import { Request, Response } from 'express';
 import * as userService from '../services/user.service';
+import * as fileService from '../services/file.service';
 import catchAsync from '../utils/catchAsync';
 import ApiError from '../utils/ApiError';
 
@@ -44,4 +45,15 @@ export const getMe = catchAsync(async (req: any, res: Response) => {
 export const updateMe = catchAsync(async (req: any, res: Response) => {
   const user = await userService.updateUserById(req.user._id.toString(), req.body);
   res.send(user);
+});
+
+export const updateAvatar = catchAsync(async (req: any, res: Response) => {
+  if (!req.file) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Please upload an image file');
+  }
+  const userId = req.user._id.toString();
+  const file = await fileService.processFileUpload(req.file, userId, 'image');
+  
+  const user = await userService.updateUserById(userId, { avatar: file.url } as any);
+  res.send({ user, avatar: file.url });
 });

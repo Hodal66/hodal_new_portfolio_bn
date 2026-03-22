@@ -2,11 +2,14 @@ import express from 'express';
 import * as userController from '../../controllers/user.controller';
 import { auth, authorize } from '../../middlewares/auth';
 
+import { upload } from '../../middlewares/upload';
+
 const router = express.Router();
 
 // Self-service routes
 router.get('/me', auth, userController.getMe);
 router.patch('/me', auth, userController.updateMe);
+router.patch('/me/avatar', auth, upload.single('avatar'), userController.updateAvatar);
 
 // Admin-only user management
 router.get('/', auth, authorize('admin'), userController.getUsers);

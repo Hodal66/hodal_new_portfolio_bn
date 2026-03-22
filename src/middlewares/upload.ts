@@ -5,23 +5,36 @@ import httpStatus from 'http-status';
 const storage = multer.memoryStorage();
 
 const fileFilter = (req: any, file: any, cb: any) => {
-  if (
-    file.mimetype.startsWith('image/') ||
-    file.mimetype === 'application/pdf' ||
-    file.mimetype === 'application/msword' ||
-    file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-    file.mimetype === 'text/plain'
-  ) {
+  const allowedMimeTypes = [
+    /^image\/.*/,
+    /^audio\/.*/,
+    /^video\/.*/,
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/zip',
+    'application/x-zip-compressed',
+    'text/plain'
+  ];
+
+  const isAllowed = allowedMimeTypes.some(type => {
+    if (type instanceof RegExp) return type.test(file.mimetype);
+    return type === file.mimetype;
+  });
+
+  if (isAllowed) {
     cb(null, true);
   } else {
-    cb(new ApiError(httpStatus.BAD_REQUEST, 'Invalid file type. Only images and documents are allowed.'), false);
+    cb(new ApiError(httpStatus.BAD_REQUEST, `Invalid file type (${file.mimetype}). Support is provided for images, audio, video, and common documents.`), false);
   }
 };
 
 export const upload = multer({
   storage,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: 50 * 1024 * 1024, // 50MB limit to match frontend
   },
   fileFilter,
 });
