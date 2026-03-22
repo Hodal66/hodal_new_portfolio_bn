@@ -8,7 +8,7 @@ import {
   verifyToken,
   blacklistUserTokens,
 } from '../services/token.service';
-import { createOtp, verifyOtp, resendOtp } from '../services/otp.service';
+import { createOtp, verifyOtp, resendOtp, invalidateAllOtps } from '../services/otp.service';
 import { OtpPurpose } from '../models/otp.model';
 import catchAsync from '../utils/catchAsync';
 import {
@@ -16,6 +16,8 @@ import {
   sendAdminNotification,
   sendOtpEmail,
   sendPasswordResetOtpEmail,
+  sendEmailAsync,
+  logOtpForDev,
 } from '../services/email.service';
 import Notification from '../models/notification.model';
 import Token, { TokenType } from '../models/token.model';
@@ -23,40 +25,65 @@ import User from '../models/user.model';
 import ApiError from '../utils/ApiError';
 import logger from '../utils/logger';
 
-// Helper: strip password from user object before sending
+// ─────────────────────── Helpers ───────────────────────
+
+/** Strip password hash from user object before sending in API response */
 const sanitizeUser = (user: any) => {
   const obj = user.toObject ? user.toObject() : { ...user };
   delete obj.password;
   return obj;
 };
 
-// ─────────────────────── REGISTRATION (Step 1: Submit Form) ───────────────────────
+/**
+ * Generate OTP and queue the email in a non-blocking way.
+ * Returns the plain OTP immediately so the caller can respond to the client.
+ * Any email failure is logged but does NOT throw — the OTP still exists in DB.
+ */
+const generateAndQueueOtpEmail = async (
+  email: string,
+  purpose: OtpPurpose,
+  sendFn: (otp: string) => Promise<void>
+): Promise<void> => {
+  const otp = await createOtp(email, purpose);
+
+  // Always log OTP in non-production for easy dev testing
+  logOtpForDev(email, otp, purpose);
+
+  // Fire-and-forget: send email asynchronously — NEVER block the API response
+  sendFn(otp).catch((err: Error) => {
+    logger.error(`OTP email delivery failed for ${email} (${purpose})`, {
+      error: err.message,
+      purpose,
+    });
+  });
+};
+
+// ─────────────────────── REGISTRATION — Step 1: Submit Form ───────────────────────
 
 export const register = catchAsync(async (req: Request, res: Response) => {
   // createUser sets status='pending' by default
   const user = await createUser(req.body);
 
-  // Generate OTP and send verification email
-  const otp = await createOtp(user.email, OtpPurpose.EMAIL_VERIFICATION);
-
-  // Fire-and-forget OTP email
-  sendOtpEmail(user.email, user.name, otp).catch((err) =>
-    logger.error('OTP verification email failed', { error: err.message })
+  // Generate OTP — fire-and-forget email (response is not blocked by email sending)
+  await generateAndQueueOtpEmail(
+    user.email,
+    OtpPurpose.EMAIL_VERIFICATION,
+    (otp) => sendOtpEmail(user.email, user.name, otp)
   );
 
-  // Admin notification
+  // Admin notification — fully async, never blocks
   sendAdminNotification(user.email, user.name).catch((err) =>
     logger.error('Admin notification email failed', { error: err.message })
   );
 
-  // Create in-app notification for admin
+  // In-app notification for admin
   Notification.create({
     title: 'New User Registration',
     message: `${user.name} (${user.email}) has signed up (pending verification).`,
     type: 'newUser',
   }).catch((err) => logger.error('Notification create failed', { error: err.message }));
 
-  logger.info(`New user registered (pending): ${user.email}`);
+  logger.info(`New user registered (pending verification): ${user.email}`);
 
   res.status(httpStatus.CREATED).json({
     message: 'Registration successful. Please check your email for the verification code.',
@@ -64,12 +91,12 @@ export const register = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-// ─────────────────────── REGISTRATION (Step 2: Verify OTP) ───────────────────────
+// ─────────────────────── REGISTRATION — Step 2: Verify OTP ───────────────────────
 
 export const verifyRegistrationOtp = catchAsync(async (req: Request, res: Response) => {
   const { email, otp } = req.body;
 
-  // Verify the OTP
+  // Verify OTP — throws ApiError on failure
   await verifyOtp(email, otp, OtpPurpose.EMAIL_VERIFICATION);
 
   // Activate the user account
@@ -77,7 +104,6 @@ export const verifyRegistrationOtp = catchAsync(async (req: Request, res: Respon
   if (!user) {
     throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
   }
-
   if (user.status === 'active') {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Account is already verified');
   }
@@ -86,15 +112,15 @@ export const verifyRegistrationOtp = catchAsync(async (req: Request, res: Respon
   user.isEmailVerified = true;
   await user.save();
 
-  // Generate auth tokens
+  // Generate auth tokens — user is logged in immediately after verification
   const tokens = await generateAuthTokens(user);
 
-  // Send welcome email
+  // Send welcome email async — does not block
   sendRegistrationEmail(user.email, user.name).catch((err) =>
     logger.error('Welcome email failed', { error: err.message })
   );
 
-  logger.info(`User email verified and activated: ${user.email}`);
+  logger.info(`User email verified and account activated: ${user.email}`);
 
   res.status(httpStatus.OK).json({
     message: 'Email verified successfully. Your account is now active.',
@@ -108,15 +134,16 @@ export const verifyRegistrationOtp = catchAsync(async (req: Request, res: Respon
 export const resendOtpHandler = catchAsync(async (req: Request, res: Response) => {
   const { email, purpose } = req.body;
 
-  const otpPurpose = purpose === 'passwordReset'
-    ? OtpPurpose.PASSWORD_RESET
-    : OtpPurpose.EMAIL_VERIFICATION;
+  const otpPurpose =
+    purpose === 'passwordReset'
+      ? OtpPurpose.PASSWORD_RESET
+      : OtpPurpose.EMAIL_VERIFICATION;
 
-  // For email verification, check that user exists and is still pending
+  // For email verification: check the user exists and is not already active
   if (otpPurpose === OtpPurpose.EMAIL_VERIFICATION) {
     const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user) {
-      // Generic message to prevent enumeration
+      // Generic response to prevent email enumeration
       return res.status(httpStatus.OK).json({
         message: 'If an account with that email exists, a new OTP has been sent.',
       });
@@ -124,15 +151,20 @@ export const resendOtpHandler = catchAsync(async (req: Request, res: Response) =
     if (user.status === 'active') {
       throw new ApiError(httpStatus.BAD_REQUEST, 'Account is already verified');
     }
-  }
 
-  const otp = await resendOtp(email, otpPurpose);
-
-  if (otpPurpose === OtpPurpose.EMAIL_VERIFICATION) {
-    const user = await User.findOne({ email: email.toLowerCase().trim() });
-    await sendOtpEmail(email, user?.name || 'User', otp);
+    // Generate OTP and send verification email asynchronously
+    await generateAndQueueOtpEmail(
+      email,
+      OtpPurpose.EMAIL_VERIFICATION,
+      (otp) => sendOtpEmail(email, user.name, otp)
+    );
   } else {
-    await sendPasswordResetOtpEmail(email, otp);
+    // Password reset resend — exact same pattern as forgotPassword
+    await generateAndQueueOtpEmail(
+      email,
+      OtpPurpose.PASSWORD_RESET,
+      (otp) => sendPasswordResetOtpEmail(email, otp)
+    );
   }
 
   logger.info(`OTP resent for ${email} (${purpose})`);
@@ -148,16 +180,20 @@ export const login = catchAsync(async (req: Request, res: Response) => {
   const { email, password } = req.body;
   const user = await loginUserWithEmailAndPassword(email, password);
 
-  // Check if account is activated
+  // If account is unverified, resend OTP automatically
   if (user.status === 'pending') {
-    // Resend OTP automatically
-    const otp = await createOtp(user.email, OtpPurpose.EMAIL_VERIFICATION);
-    sendOtpEmail(user.email, user.name, otp).catch((err) =>
+    // Fire-and-forget — don't block the login response
+    generateAndQueueOtpEmail(
+      user.email,
+      OtpPurpose.EMAIL_VERIFICATION,
+      (otp) => sendOtpEmail(user.email, user.name, otp)
+    ).catch((err) =>
       logger.error('Auto-resend OTP on login failed', { error: err.message })
     );
 
     return res.status(httpStatus.FORBIDDEN).json({
-      message: 'Your account is not verified. A new verification code has been sent to your email.',
+      message:
+        'Your account is not verified. A new verification code has been sent to your email.',
       email: user.email,
       requiresVerification: true,
     });
@@ -185,7 +221,7 @@ export const logout = catchAsync(async (req: Request, res: Response) => {
   }
   tokenDoc.blacklisted = true;
   await tokenDoc.save();
-  logger.info(`User logged out, token blacklisted`);
+  logger.info(`User logged out, refresh token blacklisted`);
   res.status(httpStatus.NO_CONTENT).send();
 });
 
@@ -198,55 +234,72 @@ export const refreshTokens = catchAsync(async (req: Request, res: Response) => {
   if (!user) {
     throw new ApiError(httpStatus.UNAUTHORIZED, 'User not found');
   }
-  // Blacklist old refresh token
+  // Rotate: blacklist old refresh token, issue fresh pair
   tokenDoc.blacklisted = true;
   await tokenDoc.save();
-  // Issue new tokens
   const tokens = await generateAuthTokens(user);
   res.send(tokens);
 });
 
-// ─────────────────────── FORGOT PASSWORD (Step 1: Request OTP) ───────────────────────
+// ─────────────────────── FORGOT PASSWORD — Step 1: Request OTP ───────────────────────
 
 export const forgotPassword = catchAsync(async (req: Request, res: Response) => {
   const { email } = req.body;
-  const user = await User.findOne({ email: email.toLowerCase().trim() });
+  const normalizedEmail = email.toLowerCase().trim();
 
-  // Always return 200 regardless to prevent email enumeration
+  // Look up user BEFORE responding — but ALWAYS return 200 to prevent enumeration
+  const user = await User.findOne({ email: normalizedEmail });
+
   if (user) {
     try {
-      const otp = await createOtp(user.email, OtpPurpose.PASSWORD_RESET);
-      await sendPasswordResetOtpEmail(user.email, otp);
-      logger.info(`Password reset OTP requested and sent for: ${user.email}`);
+      // ★ KEY FIX: Generate OTP synchronously (must complete before responding)
+      //   but send the email asynchronously (fire-and-forget)
+      await generateAndQueueOtpEmail(
+        user.email,
+        OtpPurpose.PASSWORD_RESET,
+        (otp) => sendPasswordResetOtpEmail(user.email, otp)
+      );
+      logger.info(`Password reset OTP generated and queued for: ${user.email}`);
     } catch (err: any) {
-      // If rate limited, still return generic message
       if (err.statusCode === httpStatus.TOO_MANY_REQUESTS) {
-        logger.warn(`Rate limit hit for password reset OTP: ${email}`);
+        // Rate limit hit — still return generic message to prevent enumeration
+        logger.warn(`Password reset OTP rate limit for: ${normalizedEmail}`);
       } else {
+        // Unexpected error — log and rethrow so error middleware handles it
+        logger.error(`Password reset OTP generation failed for: ${normalizedEmail}`, {
+          error: err.message,
+        });
         throw err;
       }
     }
+  } else {
+    // Log in non-production to aid debugging (don't log user emails in production)
+    if (process.env.NODE_ENV !== 'production') {
+      logger.debug(`Forgot password: no user found for email ${normalizedEmail}`);
+    }
   }
 
+  // Always respond 200 — prevents email enumeration
   res.status(httpStatus.OK).json({
     message: 'If an account with that email exists, a password reset code has been sent.',
   });
 });
 
-// ─────────────────────── FORGOT PASSWORD (Step 2: Verify Reset OTP) ───────────────────────
+// ─────────────────────── FORGOT PASSWORD — Step 2: Verify Reset OTP ───────────────────────
 
 export const verifyResetOtp = catchAsync(async (req: Request, res: Response) => {
   const { email, otp } = req.body;
 
-  // Verify the OTP
+  // Verify OTP — throws ApiError on failure (expired, invalid, too many attempts)
   await verifyOtp(email, otp, OtpPurpose.PASSWORD_RESET);
 
-  // Generate a short-lived reset token (JWT) for the actual password reset
+  // OTP verified — find the user
   const user = await User.findOne({ email: email.toLowerCase().trim() });
   if (!user) {
     throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
   }
 
+  // Issue a short-lived reset JWT (30 min window) for the actual password change step
   const resetToken = await generateResetPasswordToken(user._id.toString());
 
   logger.info(`Password reset OTP verified for: ${user.email}`);
@@ -257,28 +310,34 @@ export const verifyResetOtp = catchAsync(async (req: Request, res: Response) => 
   });
 });
 
-// ─────────────────────── FORGOT PASSWORD (Step 3: Set New Password) ───────────────────────
+// ─────────────────────── FORGOT PASSWORD — Step 3: Set New Password ───────────────────────
 
 export const resetPassword = catchAsync(async (req: Request, res: Response) => {
   const { resetToken, password } = req.body;
 
+  // Validate the reset JWT from step 2
   const tokenDoc = await verifyToken(resetToken, TokenType.RESET_PASSWORD);
   const user = await User.findById(tokenDoc.user).select('+password');
   if (!user) {
     throw new ApiError(httpStatus.UNAUTHORIZED, 'User not found');
   }
 
+  // Apply new password (pre-save hook hashes it)
   user.password = password;
   await user.save();
 
-  // Invalidate the used reset token
+  // Burn the reset token — single-use
   tokenDoc.blacklisted = true;
   await tokenDoc.save();
 
-  // Also invalidate all refresh tokens for security (force re-login)
+  // Invalidate ALL refresh tokens — forces re-login on all devices (security best practice)
   await blacklistUserTokens(user._id.toString());
 
+  // Clean up any leftover password reset OTPs (belt-and-suspenders)
+  await invalidateAllOtps(user.email, OtpPurpose.PASSWORD_RESET);
+
   logger.info(`Password reset successfully for user: ${user.email}`);
+
   res.status(httpStatus.OK).json({
     message: 'Password has been reset successfully. Please log in with your new password.',
   });

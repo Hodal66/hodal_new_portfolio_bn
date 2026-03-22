@@ -1,5 +1,12 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
 
+export interface IProjectImage {
+  url: string;
+  publicId: string;
+  isFeatured: boolean;
+  caption?: string;
+}
+
 export interface IProject extends Document {
   slug: string;
   title: string;
@@ -14,17 +21,13 @@ export interface IProject extends Document {
   overview: string;
   challenge: string;
   solution: string;
-  // Localized fields
-  titleFr?: string; titleSw?: string; titleRw?: string;
-  subtitleFr?: string; subtitleSw?: string; subtitleRw?: string;
-  categoryFr?: string; categorySw?: string; categoryRw?: string;
-  descriptionFr?: string; descriptionSw?: string; descriptionRw?: string;
-  overviewFr?: string; overviewSw?: string; overviewRw?: string;
-  challengeFr?: string; challengeSw?: string; challengeRw?: string;
-  solutionFr?: string; solutionSw?: string; solutionRw?: string;
-  image: string; // Used for iconify icons
+  // Legacy single image field (kept for backward compatibility)
+  image: string;
   gradient: string;
+  // New multi-image support
+  images: IProjectImage[];
   tech: string[];
+  tags: string[];
   architecture: { layer: string; tech: string }[];
   features: { title: string; description: string }[];
   metrics: Record<string, { value: string; label: string }>;
@@ -38,7 +41,22 @@ export interface IProject extends Document {
   };
   featured: boolean;
   order: number;
+  // Localized fields
+  titleFr?: string; titleSw?: string; titleRw?: string;
+  subtitleFr?: string; subtitleSw?: string; subtitleRw?: string;
+  categoryFr?: string; categorySw?: string; categoryRw?: string;
+  descriptionFr?: string; descriptionSw?: string; descriptionRw?: string;
+  overviewFr?: string; overviewSw?: string; overviewRw?: string;
+  challengeFr?: string; challengeSw?: string; challengeRw?: string;
+  solutionFr?: string; solutionSw?: string; solutionRw?: string;
 }
+
+const projectImageSchema = new Schema<IProjectImage>({
+  url: { type: String, required: true },
+  publicId: { type: String, required: true },
+  isFeatured: { type: Boolean, default: false },
+  caption: { type: String },
+}, { _id: false });
 
 const projectSchema: Schema<IProject> = new Schema(
   {
@@ -48,24 +66,20 @@ const projectSchema: Schema<IProject> = new Schema(
     category: { type: String, trim: true },
     year: { type: String, trim: true },
     duration: { type: String, trim: true },
-    status: { type: String, trim: true },
+    status: { type: String, trim: true, default: 'live' },
     role: { type: String, trim: true },
     team: { type: String, trim: true },
     description: { type: String, required: true, trim: true },
     overview: { type: String },
     challenge: { type: String },
     solution: { type: String },
-    // Localized fields
-    titleFr: String, titleSw: String, titleRw: String,
-    subtitleFr: String, subtitleSw: String, subtitleRw: String,
-    categoryFr: String, categorySw: String, categoryRw: String,
-    descriptionFr: String, descriptionSw: String, descriptionRw: String,
-    overviewFr: String, overviewSw: String, overviewRw: String,
-    challengeFr: String, challengeSw: String, challengeRw: String,
-    solutionFr: String, solutionSw: String, solutionRw: String,
+    // Legacy single image (iconify icon name OR Cloudinary URL — kept for backward compat)
     image: { type: String },
     gradient: { type: String },
+    // New multi-image array stored in Cloudinary
+    images: { type: [projectImageSchema], default: [] },
     tech: [{ type: String }],
+    tags: [{ type: String }],
     architecture: [
       {
         layer: { type: String },
@@ -94,15 +108,29 @@ const projectSchema: Schema<IProject> = new Schema(
       company: { type: String, trim: true },
     },
     featured: { type: Boolean, default: false },
-    order: { type: Number, default: 0 },
+    order: { type: Number, default: 0, index: true },
+    // Localized fields
+    titleFr: String, titleSw: String, titleRw: String,
+    subtitleFr: String, subtitleSw: String, subtitleRw: String,
+    categoryFr: String, categorySw: String, categoryRw: String,
+    descriptionFr: String, descriptionSw: String, descriptionRw: String,
+    overviewFr: String, overviewSw: String, overviewRw: String,
+    challengeFr: String, challengeSw: String, challengeRw: String,
+    solutionFr: String, solutionSw: String, solutionRw: String,
   },
   {
     timestamps: true,
   }
 );
 
-projectSchema.statics.isProjectNameTaken = async function (title: string, excludeProjectId: string): Promise<boolean> {
-  const project = await this.findOne({ title, _id: { $ne: excludeProjectId } });
+projectSchema.index({ slug: 1 });
+projectSchema.index({ featured: 1 });
+projectSchema.index({ category: 1 });
+
+projectSchema.statics.isProjectNameTaken = async function (title: string, excludeProjectId?: string): Promise<boolean> {
+  const query: any = { title };
+  if (excludeProjectId) query._id = { $ne: excludeProjectId };
+  const project = await this.findOne(query);
   return !!project;
 };
 

@@ -89,7 +89,28 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
 }));
 
-// Rate limiting
+// ── Tiered Rate Limiting ──────────────────────────────────────
+// Tier 1: Strict OTP generation limit — 5 requests per 15 min per IP
+// (per-email cooldown is enforced separately in otp.service.ts)
+const otpGenerationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { code: 429, message: 'Too many OTP requests. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: false,
+});
+
+// Tier 2: OTP verification — 10 per 15 min per IP
+const otpVerificationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { code: 429, message: 'Too many verification attempts. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Tier 3: General auth routes (login, logout, refresh)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -98,7 +119,13 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-app.use('/v1/auth', authLimiter);
+// Apply rate limiters to specific auth paths
+app.use('/v1/auth/forgot-password', otpGenerationLimiter);
+app.use('/v1/auth/resend-otp', otpGenerationLimiter);
+app.use('/v1/auth/register', otpGenerationLimiter);
+app.use('/v1/auth/verify-otp', otpVerificationLimiter);
+app.use('/v1/auth/verify-reset-otp', otpVerificationLimiter);
+app.use('/v1/auth', authLimiter); // General catch-all for remaining auth routes
 
 // Health check
 app.get('/health', (_req: Request, res: Response) => {
