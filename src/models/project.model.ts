@@ -14,6 +14,14 @@ export interface IProject extends Document {
   overview: string;
   challenge: string;
   solution: string;
+  // Localized fields
+  titleFr?: string; titleSw?: string; titleRw?: string;
+  subtitleFr?: string; subtitleSw?: string; subtitleRw?: string;
+  categoryFr?: string; categorySw?: string; categoryRw?: string;
+  descriptionFr?: string; descriptionSw?: string; descriptionRw?: string;
+  overviewFr?: string; overviewSw?: string; overviewRw?: string;
+  challengeFr?: string; challengeSw?: string; challengeRw?: string;
+  solutionFr?: string; solutionSw?: string; solutionRw?: string;
   image: string; // Used for iconify icons
   gradient: string;
   tech: string[];
@@ -47,6 +55,14 @@ const projectSchema: Schema<IProject> = new Schema(
     overview: { type: String },
     challenge: { type: String },
     solution: { type: String },
+    // Localized fields
+    titleFr: String, titleSw: String, titleRw: String,
+    subtitleFr: String, subtitleSw: String, subtitleRw: String,
+    categoryFr: String, categorySw: String, categoryRw: String,
+    descriptionFr: String, descriptionSw: String, descriptionRw: String,
+    overviewFr: String, overviewSw: String, overviewRw: String,
+    challengeFr: String, challengeSw: String, challengeRw: String,
+    solutionFr: String, solutionSw: String, solutionRw: String,
     image: { type: String },
     gradient: { type: String },
     tech: [{ type: String }],

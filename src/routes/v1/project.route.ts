@@ -8,6 +8,8 @@ import {
   getProjectSchema,
 } from '../../validations/project.validation';
 
+import { upload } from '../../middlewares/upload';
+
 const router = express.Router();
 
 router
@@ -20,5 +22,7 @@ router
   .get(validate(getProjectSchema, 'params'), projectController.getProject)        // Public: view one
   .patch(auth, authorize('admin'), validate(updateProjectSchema), projectController.updateProject)  // Admin only
   .delete(auth, authorize('admin'), validate(getProjectSchema, 'params'), projectController.deleteProject); // Admin only
+
+router.patch('/:projectId/image', auth, authorize('admin'), upload.single('image'), projectController.updateProjectImage);
 
 export default router;
