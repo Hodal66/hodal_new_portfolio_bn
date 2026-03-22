@@ -27,7 +27,7 @@ transport.verify()
     console.log('✅ Connected to email server successfully');
     process.exit(0);
   })
-  .catch((err) => {
+  .catch((err: any) => {
     console.error('❌ Unable to connect to email server:');
     console.error(err);
     process.exit(1);
