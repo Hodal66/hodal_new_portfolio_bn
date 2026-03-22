@@ -84,7 +84,7 @@ export const sendEmail = async (
   const isDev = config.env !== 'production';
 
   if (!config.email.enableNotifications && !isDev) {
-    logger.debug(`[Email skipped — notifications disabled] To: ${to}`);
+    logger.warn(`[Email skip-check] Delivery is currently DISABLED on this instance based on ENABLE_EMAIL_NOTIFICATIONS=false.`);
     return;
   }
 
@@ -93,7 +93,7 @@ export const sendEmail = async (
     try {
       await sgMail.send({
         to,
-        from: config.email.from,
+        from: config.email.from || "Hodaltech <hodalmuheto1@gmail.com>",
         subject,
         text,
         html: html || text,
@@ -101,21 +101,29 @@ export const sendEmail = async (
       logger.info(`📧 SendGrid email sent → ${to} | "${subject}"`);
       return;
     } catch (err: any) {
-      logger.error(`❌ SendGrid failed, falling back to SMTP... Error: ${err.message}`);
+      // Detailed logging for SendGrid — they often put reasons in response.body
+      const details = err.response?.body ? JSON.stringify(err.response.body, null, 2) : 'No extra details';
+      logger.error(`❌ SendGrid failed for ${to}. Error: ${err.message} | Details: ${details}`);
+      logger.info('🔄 Attempting fallback delivery via SMTP...');
       // Fall through to SMTP if SendGrid fails
     }
   }
 
   // ── Case 2: Nodemailer / SMTP Fallback ──
   const msg: Mail.Options = {
-    from: config.email.from,
+    from: config.email.from || "Hodaltech <hodalmuheto1@gmail.com>",
     to,
     subject,
     text,
     ...(html ? { html } : {}),
   };
 
-  await sendWithRetry(msg);
+  try {
+    await sendWithRetry(msg);
+  } catch (err: any) {
+    logger.error(`🚨 CRITICAL: All email delivery methods failed for ${to}. Finally giving up.`);
+    throw err; // Re-throw to be caught by the service caller
+  }
 };
 
 const sendWithRetry = async (
@@ -127,18 +135,20 @@ const sendWithRetry = async (
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       await transport.sendMail(options);
-      logger.info(
-        `📧 SMTP Fallback email sent → ${options.to} (attempt ${attempt})`
-      );
+      logger.info(`📧 SMTP Fallback delivery SUCCESS → ${options.to} (attempt ${attempt})`);
       return;
-    } catch (err: unknown) {
+    } catch (err: any) {
       lastError = err instanceof Error ? err : new Error(String(err));
+      logger.error(`⚠️ SMTP fallback attempt ${attempt} failed for ${options.to}: ${err.message}`);
+      
       if (attempt < maxAttempts) {
-        await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
+        const delay = 1000 * Math.pow(2, attempt - 1);
+        await new Promise((r) => setTimeout(r, delay));
       }
     }
   }
-  throw lastError;
+
+  throw new Error(`Email delivery system exhaustion. Last attempt error: ${lastError?.message}`);
 };
 
 // ─────────────────────── OTP Dev Fallback ───────────────────────
