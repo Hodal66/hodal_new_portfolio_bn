@@ -18,14 +18,22 @@ export const createProject = async (projectBody: IProject): Promise<IProject> =>
  * Query for projects with pagination and filtering
  * @param {Object} filter - Mongo filter
  * @param {Object} options - Query options
- * @returns {Promise<IProject[]>}
+ * @returns {Promise<{ projects: IProject[]; total: number; limit: number; skip: number }>}
  */
-export const queryProjects = async (filter: any, options: any): Promise<IProject[]> => {
-  const projects = await Project.find(filter)
-    .sort({ order: 1, createdAt: -1 }) // Default sort
-    .limit(options.limit)
-    .skip(options.skip);
-  return projects;
+export const queryProjects = async (
+  filter: any,
+  options: any
+): Promise<{ projects: IProject[]; total: number; limit: number; skip: number }> => {
+  const { limit = 50, skip = 0 } = options;
+  const [projects, total] = await Promise.all([
+    Project.find(filter)
+      .sort({ order: 1, createdAt: -1 })
+      .limit(limit)
+      .skip(skip)
+      .lean(),
+    Project.countDocuments(filter),
+  ]);
+  return { projects, total, limit, skip };
 };
 
 /**
