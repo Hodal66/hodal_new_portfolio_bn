@@ -55,7 +55,12 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(compression());
 
-const allowedOrigins = [config.frontendUrl];
+const allowedOrigins = [
+  config.frontendUrl,
+  'https://hodal-new-portfolio.onrender.com', // Potential production frontend
+  'https://hodal-new-portfolio-bn.onrender.com' // Self-reference for internal calls
+];
+
 if (config.env === 'development') {
   ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173', 'http://localhost:5174'].forEach((o) => {
     if (!allowedOrigins.includes(o)) allowedOrigins.push(o);
@@ -64,7 +69,14 @@ if (config.env === 'development') {
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is allowed or matches our onrender.com pattern
+    const isAllowed = allowedOrigins.includes(origin) || 
+                      origin.endsWith('.onrender.com');
+                      
+    if (isAllowed) {
       callback(null, true);
     } else {
       callback(new Error(`Origin ${origin} not allowed by CORS`));
@@ -72,7 +84,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
 }));
 
 // Rate limiting
