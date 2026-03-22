@@ -5,7 +5,7 @@ dotenv.config({ path: path.join(__dirname, '../../.env') });
 
 export const config = {
   env: process.env.NODE_ENV || 'development',
-  port: process.env.PORT || 3300,
+  port: process.env.PORT ? parseInt(process.env.PORT, 10) : 10000,
   frontendUrl: process.env.FRONTEND_URL || 'https://hodal-new-portfolio.onrender.com',
   mongoose: {
     url: process.env.MONGODB_URI || process.env.MONGODB_URL || '',
