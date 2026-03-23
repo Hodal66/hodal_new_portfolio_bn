@@ -95,16 +95,64 @@ export const sendEmailAsync = (to: string, subject: string, text: string, html?:
   sendEmail(to, subject, text, html).catch(err => logger.error(`Async Email Failed: ${err.message}`));
 };
 
-/** ──────────────────────── Functional Emails ──────────────────────── */
-
+/**
+ * Send an OTP for email verification using SendGrid Dynamic Templates (Priority)
+ */
 export const sendOtpEmail = async (to: string, name: string, otp: string) => {
+  const subject = `🔐 Verification Code: ${otp}`;
+  
+  // ── Priority 1: SendGrid Dynamic Template ──
+  if (config.email.sendgridApiKey && config.email.dynamicTemplateId) {
+    try {
+      await sgMail.send({
+        to,
+        from: config.email.from || "Hodaltech Security <hodalmuheto1@gmail.com>",
+        templateId: config.email.dynamicTemplateId,
+        dynamicTemplateData: {
+          user_name: name,
+          otp_code: otp,
+          app_name: "HodalTech Systems",
+          expiry_minutes: 10,
+        },
+      });
+      logger.info(`📧 SendGrid Template Transmitted → ${to}`);
+      return;
+    } catch (err: any) {
+      logger.error(`❌ SendGrid Template Delivery Failed: ${err.message}`);
+      // Fallback to manual template and SMTP
+    }
+  }
+
+  // ── Priority 2: Standard Fallback (Templates) ──
   const html = getOtpTemplate(otp, name);
-  return sendEmail(to, '🔐 HodalTech: Verification Code', `Your OTP is ${otp}`, html);
+  return sendEmail(to, subject, `Your OTP is ${otp}`, html);
 };
 
+/**
+ * Send an OTP for password reset using dynamic templates
+ */
 export const sendPasswordResetOtpEmail = async (to: string, otp: string) => {
-  const html = getResetPasswordTemplate(otp, 'Security Protocol');
-  return sendEmail(to, '🔑 HodalTech: Password Reset', `Your Reset Code is ${otp}`, html);
+  const subject = `🔑 Password Overwrite Protocol: ${otp}`;
+  
+  if (config.email.sendgridApiKey && config.email.dynamicTemplateId) {
+    try {
+      await sgMail.send({
+        to,
+        from: config.email.from || "Hodaltech Security <hodalmuheto1@gmail.com>",
+        templateId: config.email.dynamicTemplateId,
+        dynamicTemplateData: {
+          user_name: "Client",
+          otp_code: otp,
+          app_name: "HodalTech Recovery",
+          expiry_minutes: 10,
+        },
+      });
+      return;
+    } catch (err: any) {}
+  }
+
+  const html = getResetPasswordTemplate(otp, 'Account Recovery');
+  return sendEmail(to, subject, `Your Reset Code is ${otp}`, html);
 };
 
 export const sendAdminNotification = async (userEmail: string, userName: string) => {

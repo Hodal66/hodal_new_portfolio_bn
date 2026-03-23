@@ -14,7 +14,7 @@ const router = express.Router();
 // ─── Public Routes ─────────────────────────────────────
 
 router.get('/', projectController.getProjects);                              // All projects (with optional ?featured=true&category=...)
-router.get('/:projectId', validate(getProjectSchema, 'params'), projectController.getProject); // By ID or slug
+router.get('/:projectId', validate(getProjectSchema), projectController.getProject); // By ID or slug
 
 // ─── Admin-only Routes ─────────────────────────────────────
 
@@ -35,7 +35,7 @@ router.patch(
 router.delete(
   '/:projectId',
   auth, authorize('admin'),
-  validate(getProjectSchema, 'params'),
+  validate(getProjectSchema),
   projectController.deleteProject
 );
 

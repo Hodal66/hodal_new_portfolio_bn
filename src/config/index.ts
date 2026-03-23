@@ -25,6 +25,8 @@ const envVarsSchema = Joi.object()
     CLOUDINARY_CLOUD_NAME: Joi.string().required(),
     CLOUDINARY_API_KEY: Joi.string().required(),
     CLOUDINARY_API_SECRET: Joi.string().required(),
+    REDIS_URL: Joi.string().required().description('Redis URL for rate limiting and OTP storage'),
+    SENDGRID_DYNAMIC_TEMPLATE_ID: Joi.string().required().description('SendGrid Dynamic Template ID'),
     FRONTEND_URL: Joi.string().default('https://hodal-new-portfolio.onrender.com'),
   })
   .unknown();
@@ -80,6 +82,11 @@ export const config = {
         ? envVars.ENABLE_EMAIL_NOTIFICATIONS === 'true'
         : true,
     sendgridApiKey: envVars.HodalTechGridAPIKey,
+    dynamicTemplateId: envVars.SENDGRID_DYNAMIC_TEMPLATE_ID,
+  },
+
+  redis: {
+    url: envVars.REDIS_URL,
   },
 
   otp: {

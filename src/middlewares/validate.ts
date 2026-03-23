@@ -1,28 +1,30 @@
 import { Request, Response, NextFunction } from 'express';
-import Joi from 'joi';
+import { ZodSchema, ZodError } from 'zod';
 import httpStatus from 'http-status';
 import ApiError from '../utils/ApiError';
 
-type ValidationTarget = 'body' | 'query' | 'params';
-
 /**
- * Validate request data against a Joi schema
+ * Universal Zod Validation Middleware.
  */
-export const validate = (schema: Joi.ObjectSchema, target: ValidationTarget = 'body') => {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const { error, value } = schema.validate(req[target], {
-      abortEarly: false,    // return all errors, not just the first
-      allowUnknown: false,  // reject unknown keys
-      stripUnknown: true,   // remove unknown keys from the validated value
+export const validate = (schema: ZodSchema) => async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed: any = await schema.parseAsync({
+      body: req.body,
+      query: req.query,
+      params: req.params,
     });
 
-    if (error) {
-      const message = error.details.map((d) => d.message).join(', ');
-      return next(new ApiError(httpStatus.BAD_REQUEST, message));
-    }
+    // Update with validated data
+    req.body = parsed.body || req.body;
+    req.query = parsed.query || req.query;
+    req.params = parsed.params || req.params;
 
-    // Replace req[target] with the validated (and stripped) value
-    req[target] = value;
-    next();
-  };
+    return next();
+  } catch (error) {
+    if (error instanceof ZodError) {
+      const errorMessage = error.issues.map((issue) => issue.message).join(', ');
+      return next(new ApiError(httpStatus.BAD_REQUEST, `Protocol Violation: ${errorMessage}`));
+    }
+    return next(error);
+  }
 };

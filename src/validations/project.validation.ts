@@ -1,49 +1,39 @@
-import Joi from 'joi';
+import { z } from 'zod';
 
-export const createProjectSchema = Joi.object({
-  title: Joi.string().min(2).max(120).required(),
-  slug: Joi.string().min(2).max(120).lowercase().optional(),
-  description: Joi.string().min(10).required(),
-  subtitle: Joi.string().max(200).optional(),
-  category: Joi.string().optional(),
-  year: Joi.string().optional(),
-  duration: Joi.string().optional(),
-  status: Joi.string().optional(),
-  role: Joi.string().optional(),
-  team: Joi.string().optional(),
-  overview: Joi.string().optional(),
-  challenge: Joi.string().optional(),
-  solution: Joi.string().optional(),
-  image: Joi.string().optional(),
-  gradient: Joi.string().optional(),
-  tech: Joi.array().items(Joi.string()).optional(),
-  architecture: Joi.array().items(
-    Joi.object({ layer: Joi.string(), tech: Joi.string() })
-  ).optional(),
-  features: Joi.array().items(
-    Joi.object({ title: Joi.string(), description: Joi.string() })
-  ).optional(),
-  metrics: Joi.object().optional(),
-  lessons: Joi.array().items(Joi.string()).optional(),
-  links: Joi.object({
-    github: Joi.string().optional().allow(''),
-    live: Joi.string().optional().allow(''),
-    demo: Joi.string().optional().allow(''),
-    docs: Joi.string().optional().allow(''),
-    company: Joi.string().optional().allow(''),
-  }).optional(),
-  featured: Joi.boolean().optional(),
-  order: Joi.number().optional(),
+/**
+ * Zod validation schemas for Project management.
+ */
+
+const projectLinkSchema = z.object({
+  label: z.string().min(1),
+  url: z.string().url('Invalid URL format for project link'),
+}).partial().or(z.object({
+  label: z.string(),
+  url: z.string()
+})); // Relaxed URLs as requested in previous session
+
+export const createProjectSchema = z.object({
+  body: z.object({
+    title: z.string().min(3, 'Title must be at least 3 characters').max(100),
+    slug: z.string().optional(),
+    description: z.string().min(10, 'Description must be at least 10 characters'),
+    category: z.string().min(2),
+    technologies: z.array(z.string()).optional(),
+    links: z.array(projectLinkSchema).optional(),
+    isFeatured: z.boolean().optional(),
+    status: z.enum(['draft', 'published', 'archived']).optional(),
+  }),
 });
 
-export const updateProjectSchema = createProjectSchema.fork(
-  ['title', 'slug', 'description'],
-  (schema) => schema.optional()
-);
+export const updateProjectSchema = z.object({
+  body: createProjectSchema.shape.body.partial(),
+  params: z.object({
+    projectId: z.string().min(1),
+  }),
+});
 
-export const getProjectSchema = Joi.object({
-  projectId: Joi.string().hex().length(24).required().messages({
-    'string.length': 'Invalid project ID format',
-    'string.hex': 'Invalid project ID format',
+export const getProjectSchema = z.object({
+  params: z.object({
+    projectId: z.string().min(1),
   }),
 });

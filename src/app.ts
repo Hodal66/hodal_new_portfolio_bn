@@ -119,15 +119,7 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Apply rate limiters to specific auth paths
-app.use('/v1/auth/forgot-password', otpGenerationLimiter);
-app.use('/v1/auth/resend-otp', otpGenerationLimiter);
-app.use('/v1/auth/register', otpGenerationLimiter);
-app.use('/v1/auth/verify-otp', otpVerificationLimiter);
-app.use('/v1/auth/verify-reset-otp', otpVerificationLimiter);
-app.use('/v1/auth', authLimiter); // General catch-all for remaining auth routes
-
-// Health check
+// ──────────────────────── Health Check ───────────────────────
 app.get('/health', (_req: Request, res: Response) => {
   res.status(httpStatus.OK).json({
     status: 'ok',

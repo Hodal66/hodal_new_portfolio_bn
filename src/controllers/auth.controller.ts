@@ -1,34 +1,21 @@
 import httpStatus from 'http-status';
 import { Request, Response } from 'express';
+import crypto from 'crypto';
 import { createUser } from '../services/user.service';
 import { loginUserWithEmailAndPassword } from '../services/auth.service';
-import {
-  generateAuthTokens,
-  generateResetPasswordToken,
-  verifyToken,
-  blacklistUserTokens,
-} from '../services/token.service';
-import { createOtp, verifyOtp, resendOtp, invalidateAllOtps } from '../services/otp.service';
-import { OtpPurpose } from '../models/otp.model';
+import { generateAuthTokens, generateResetPasswordToken, verifyToken, blacklistUserTokens } from '../services/token.service';
 import catchAsync from '../utils/catchAsync';
-import {
-  sendRegistrationEmail,
-  sendAdminNotification,
-  sendOtpEmail,
-  sendPasswordResetOtpEmail,
-  sendEmailAsync,
-  logOtpForDev,
-} from '../services/email.service';
+import { sendRegistrationEmail, sendAdminNotification, sendOtpEmail, sendPasswordResetOtpEmail, logOtpForDev } from '../services/email.service';
 import Notification from '../models/notification.model';
 import Token, { TokenType } from '../models/token.model';
 import User from '../models/user.model';
 import ApiError from '../utils/ApiError';
 import logger from '../utils/logger';
 import { config } from '../config';
+import redis from '../utils/redis';
 
-// ─────────────────────── Helpers ───────────────────────
+/** ──────────────────────── Helpers ──────────────────────── */
 
-/** Strip password hash from user object before sending in API response */
 const sanitizeUser = (user: any) => {
   const obj = user.toObject ? user.toObject() : { ...user };
   delete obj.password;
@@ -36,168 +23,81 @@ const sanitizeUser = (user: any) => {
 };
 
 /**
- * Generate OTP and queue the email in a non-blocking way.
- * Returns the plain OTP immediately so the caller can respond to the client.
- * Any email failure is logged but does NOT throw — the OTP still exists in DB.
+ * Professional OTP Generator & Redis Storer.
+ * Uses crypto.randomInt for high-entropy 6-digit codes.
+ * Stores in Redis with 10-minute TTL.
  */
-const generateAndQueueOtpEmail = async (
-  email: string,
-  purpose: OtpPurpose,
-  sendFn: (otp: string) => Promise<void>
-): Promise<string> => {
-  const otp = await createOtp(email, purpose);
-
-  // Always log OTP in non-production for easy dev testing
+const issueOtp = async (email: string, purpose: 'verify' | 'reset'): Promise<string> => {
+  const otp = crypto.randomInt(100000, 999999).toString();
+  const key = `otp:${purpose}:${email.toLowerCase().trim()}`;
+  
+  // Store in Redis: { otp, attempts: 0 } with 10 min TTL
+  await redis.set(key, JSON.stringify({ otp, attempts: 0 }), 'EX', 600);
+  
   logOtpForDev(email, otp, purpose);
-
-  // Fire-and-forget: send email asynchronously — NEVER block the API response
-  sendFn(otp).catch((err: Error) => {
-    logger.error(`OTP email delivery failed for ${email} (${purpose})`, {
-      error: err.message,
-      purpose,
-    });
-  });
-
   return otp;
 };
 
-// ─────────────────────── REGISTRATION — Step 1: Submit Form ───────────────────────
+/** ──────────────────────── Auth Handlers ──────────────────────── */
 
 export const register = catchAsync(async (req: Request, res: Response) => {
-  // createUser sets status='pending' by default
   const user = await createUser(req.body);
+  const otp = await issueOtp(user.email, 'verify');
 
-  // Generate OTP — fire-and-forget email (response is not blocked by email sending)
-  const otp = await generateAndQueueOtpEmail(
-    user.email,
-    OtpPurpose.EMAIL_VERIFICATION,
-    (otp) => sendOtpEmail(user.email, user.name, otp)
-  );
-
-  // Admin notification — fully async, never blocks
-  sendAdminNotification(user.email, user.name).catch((err) =>
-    logger.error('Admin notification email failed', { error: err.message })
-  );
-
-  // In-app notification for admin
+  // Async notifications
+  sendOtpEmail(user.email, user.name, otp).catch(e => logger.error('OTP Email Fail', e));
+  sendAdminNotification(user.email, user.name).catch(e => logger.error('Admin Alert Fail', e));
+  
   Notification.create({
     title: 'New User Registration',
-    message: `${user.name} (${user.email}) has signed up (pending verification).`,
+    message: `${user.name} (${user.email}) initiated registration.`,
     type: 'newUser',
-  }).catch((err) => logger.error('Notification create failed', { error: err.message }));
-
-  logger.info(`New user registered (pending verification): ${user.email}`);
+  }).catch(() => {});
 
   res.status(httpStatus.CREATED).json({
-    message: 'Registration successful. Please check your email for the verification code.',
+    message: 'Entity initialized. Security token dispatched to email ecosystem.',
     email: user.email,
     ...(config.env !== 'production' ? { devOtp: otp } : {}),
   });
 });
 
-// ─────────────────────── REGISTRATION — Step 2: Verify OTP ───────────────────────
-
 export const verifyRegistrationOtp = catchAsync(async (req: Request, res: Response) => {
   const { email, otp } = req.body;
+  const key = `otp:verify:${email.toLowerCase().trim()}`;
+  const data = await redis.get(key);
 
-  // Verify OTP — throws ApiError on failure
-  await verifyOtp(email, otp, OtpPurpose.EMAIL_VERIFICATION);
+  if (!data) throw new ApiError(httpStatus.BAD_REQUEST, 'Security token expired or invalid initialization.');
+  const { otp: storedOtp } = JSON.parse(data);
 
-  // Activate the user account
+  if (storedOtp !== otp) {
+    throw new ApiError(httpStatus.UNAUTHORIZED, 'Invalid security token sequence.');
+  }
+
+  // Success: Burn the OTP
+  await redis.del(key);
+
   const user = await User.findOne({ email: email.toLowerCase().trim() });
-  if (!user) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
-  }
-  if (user.status === 'active') {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Account is already verified');
-  }
-
+  if (!user) throw new ApiError(httpStatus.NOT_FOUND, 'Entity not found in cryptovault.');
+  
   user.status = 'active';
   user.isEmailVerified = true;
   await user.save();
 
-  // Generate auth tokens — user is logged in immediately after verification
   const tokens = await generateAuthTokens(user);
+  sendRegistrationEmail(user.email, user.name).catch(() => {});
 
-  // Send welcome email async — does not block
-  sendRegistrationEmail(user.email, user.name).catch((err) =>
-    logger.error('Welcome email failed', { error: err.message })
-  );
-
-  logger.info(`User email verified and account activated: ${user.email}`);
-
-  res.status(httpStatus.OK).json({
-    message: 'Email verified successfully. Your account is now active.',
-    user: sanitizeUser(user),
-    tokens,
-  });
+  res.json({ message: 'Identity verified. Access tokens granted.', user: sanitizeUser(user), tokens });
 });
-
-// ─────────────────────── RESEND OTP ───────────────────────
-
-export const resendOtpHandler = catchAsync(async (req: Request, res: Response) => {
-  const { email, purpose } = req.body;
-
-  const otpPurpose =
-    purpose === 'passwordReset'
-      ? OtpPurpose.PASSWORD_RESET
-      : OtpPurpose.EMAIL_VERIFICATION;
-
-  let otp;
-  // For email verification: check the user exists and is not already active
-  if (otpPurpose === OtpPurpose.EMAIL_VERIFICATION) {
-    const user = await User.findOne({ email: email.toLowerCase().trim() });
-    if (!user) {
-      // Generic response to prevent email enumeration
-      return res.status(httpStatus.OK).json({
-        message: 'If an account with that email exists, a new OTP has been sent.',
-      });
-    }
-    if (user.status === 'active') {
-      throw new ApiError(httpStatus.BAD_REQUEST, 'Account is already verified');
-    }
-
-    // Generate OTP and send verification email asynchronously
-    otp = await generateAndQueueOtpEmail(
-      email,
-      OtpPurpose.EMAIL_VERIFICATION,
-      (otp) => sendOtpEmail(email, user.name, otp)
-    );
-  } else {
-    // Password reset resend — exact same pattern as forgotPassword
-    otp = await generateAndQueueOtpEmail(
-      email,
-      OtpPurpose.PASSWORD_RESET,
-      (otp) => sendPasswordResetOtpEmail(email, otp)
-    );
-  }
-
-  logger.info(`OTP resent for ${email} (${purpose})`);
-
-  res.status(httpStatus.OK).json({
-    message: 'If an account with that email exists, a new OTP has been sent.',
-    ...(config.env !== 'production' ? { devOtp: otp } : {}),
-  });
-});
-
-// ─────────────────────── LOGIN ───────────────────────
 
 export const login = catchAsync(async (req: Request, res: Response) => {
   const { email, password } = req.body;
   const user = await loginUserWithEmailAndPassword(email, password);
 
-  // If account is unverified, resend OTP automatically
   if (user.status === 'pending') {
-    // Generate code synchronously so we can return it in the response for dev mode
-    const otp = await generateAndQueueOtpEmail(
-      user.email,
-      OtpPurpose.EMAIL_VERIFICATION,
-      (otp) => sendOtpEmail(user.email, user.name, otp)
-    );
-
+    const otp = await issueOtp(user.email, 'verify');
+    sendOtpEmail(user.email, user.name, otp).catch(() => {});
     return res.status(httpStatus.FORBIDDEN).json({
-      message:
-        'Your account is not verified. A new verification code has been sent to your email.',
+      message: 'Verification required. A new security token has been dispatched.',
       email: user.email,
       requiresVerification: true,
       ...(config.env !== 'production' ? { devOtp: otp } : {}),
@@ -205,149 +105,89 @@ export const login = catchAsync(async (req: Request, res: Response) => {
   }
 
   const tokens = await generateAuthTokens(user);
-  logger.info(`User logged in: ${user.email}`);
   res.send({ user: sanitizeUser(user), tokens });
 });
 
-// ─────────────────────── LOGOUT ───────────────────────
+export const forgotPassword = catchAsync(async (req: Request, res: Response) => {
+  const { email } = req.body;
+  const user = await User.findOne({ email: email.toLowerCase().trim() });
+
+  // Safety: Always return 200, but only issue OTP if user exists
+  if (user) {
+    const otp = await issueOtp(user.email, 'reset');
+    sendPasswordResetOtpEmail(user.email, otp).catch(() => {});
+  }
+
+  res.json({ message: 'If the entity exists in our vault, a recovery sequence has been dispatched.' });
+});
+
+export const verifyResetOtp = catchAsync(async (req: Request, res: Response) => {
+  const { email, otp } = req.body;
+  const key = `otp:reset:${email.toLowerCase().trim()}`;
+  const data = await redis.get(key);
+
+  if (!data) throw new ApiError(httpStatus.BAD_REQUEST, 'Recovery sequence expired.');
+  const { otp: storedOtp } = JSON.parse(data);
+
+  if (storedOtp !== otp) throw new ApiError(httpStatus.UNAUTHORIZED, 'Invalid recovery token.');
+
+  await redis.del(key);
+  const user = await User.findOne({ email: email.toLowerCase().trim() });
+  if (!user) throw new ApiError(httpStatus.NOT_FOUND, 'User not found.');
+
+  const resetToken = await generateResetPasswordToken(user._id.toString());
+  res.json({ message: 'Recovery authorized.', resetToken });
+});
+
+export const resetPassword = catchAsync(async (req: Request, res: Response) => {
+  const { resetToken, password } = req.body;
+  const tokenDoc = await verifyToken(resetToken, TokenType.RESET_PASSWORD);
+  const user = await User.findById(tokenDoc.user);
+  
+  if (!user) throw new ApiError(httpStatus.UNAUTHORIZED, 'Identity verification failed.');
+
+  user.password = password;
+  await user.save();
+  
+  tokenDoc.blacklisted = true;
+  await tokenDoc.save();
+  await blacklistUserTokens(user._id.toString());
+
+  res.json({ message: 'Password overwrite successful. Access restored.' });
+});
 
 export const logout = catchAsync(async (req: Request, res: Response) => {
   const { refreshToken } = req.body;
-  if (!refreshToken) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Refresh token is required');
+  const tokenDoc = await Token.findOne({ token: refreshToken, type: TokenType.REFRESH });
+  if (tokenDoc) {
+    tokenDoc.blacklisted = true;
+    await tokenDoc.save();
   }
-  const tokenDoc = await Token.findOne({
-    token: refreshToken,
-    type: TokenType.REFRESH,
-    blacklisted: false,
-  });
-  if (!tokenDoc) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Token not found');
-  }
-  tokenDoc.blacklisted = true;
-  await tokenDoc.save();
-  logger.info(`User logged out, refresh token blacklisted`);
   res.status(httpStatus.NO_CONTENT).send();
 });
-
-// ─────────────────────── REFRESH TOKENS ───────────────────────
 
 export const refreshTokens = catchAsync(async (req: Request, res: Response) => {
   const { refreshToken } = req.body;
   const tokenDoc = await verifyToken(refreshToken, TokenType.REFRESH);
   const user = await User.findById(tokenDoc.user);
-  if (!user) {
-    throw new ApiError(httpStatus.UNAUTHORIZED, 'User not found');
-  }
-  // Rotate: blacklist old refresh token, issue fresh pair
+  if (!user) throw new ApiError(httpStatus.UNAUTHORIZED, 'Invalid session.');
+
   tokenDoc.blacklisted = true;
   await tokenDoc.save();
   const tokens = await generateAuthTokens(user);
   res.send(tokens);
 });
 
-// ─────────────────────── FORGOT PASSWORD — Step 1: Request OTP ───────────────────────
-
-export const forgotPassword = catchAsync(async (req: Request, res: Response) => {
-  const { email } = req.body;
-  const normalizedEmail = email.toLowerCase().trim();
-
-  // Look up user BEFORE responding — but ALWAYS return 200 to prevent enumeration
-  const user = await User.findOne({ email: normalizedEmail });
-
-  if (user) {
-    try {
-      // ★ KEY FIX: Generate OTP synchronously (must complete before responding)
-      //   but send the email asynchronously (fire-and-forget)
-      const otp = await generateAndQueueOtpEmail(
-        user.email,
-        OtpPurpose.PASSWORD_RESET,
-        (otp) => sendPasswordResetOtpEmail(user.email, otp)
-      );
-      
-      return res.status(httpStatus.OK).json({
-        message: 'If an account with that email exists, a password reset code has been sent.',
-        ...(config.env !== 'production' ? { devOtp: otp } : {}),
-      });
-    } catch (err: any) {
-      if (err.statusCode === httpStatus.TOO_MANY_REQUESTS) {
-        // Rate limit hit — still return generic message to prevent enumeration
-        logger.warn(`Password reset OTP rate limit for: ${normalizedEmail}`);
-      } else {
-        // Unexpected error — log and rethrow so error middleware handles it
-        logger.error(`Password reset OTP generation failed for: ${normalizedEmail}`, {
-          error: err.message,
-        });
-        throw err;
-      }
-    }
-  } else {
-    // Log in non-production to aid debugging (don't log user emails in production)
-    if (process.env.NODE_ENV !== 'production') {
-      logger.debug(`Forgot password: no user found for email ${normalizedEmail}`);
-    }
-  }
-
-  // Always respond 200 — prevents email enumeration
-  res.status(httpStatus.OK).json({
-    message: 'If an account with that email exists, a password reset code has been sent.',
-  });
-});
-
-// ─────────────────────── FORGOT PASSWORD — Step 2: Verify Reset OTP ───────────────────────
-
-export const verifyResetOtp = catchAsync(async (req: Request, res: Response) => {
-  const { email, otp } = req.body;
-
-  // Verify OTP — throws ApiError on failure (expired, invalid, too many attempts)
-  await verifyOtp(email, otp, OtpPurpose.PASSWORD_RESET);
-
-  // OTP verified — find the user
+export const resendOtpHandler = catchAsync(async (req: Request, res: Response) => {
+  const { email, purpose } = req.body;
   const user = await User.findOne({ email: email.toLowerCase().trim() });
-  if (!user) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
-  }
+  if (!user) return res.json({ message: 'Dispatched.' });
 
-  // Issue a short-lived reset JWT (30 min window) for the actual password change step
-  const resetToken = await generateResetPasswordToken(user._id.toString());
+  const type = purpose === 'passwordReset' ? 'reset' : 'verify';
+  const otp = await issueOtp(email, type);
+  
+  if (type === 'verify') sendOtpEmail(email, user.name, otp).catch(() => {});
+  else sendPasswordResetOtpEmail(email, otp).catch(() => {});
 
-  logger.info(`Password reset OTP verified for: ${user.email}`);
-
-  res.status(httpStatus.OK).json({
-    message: 'OTP verified successfully. You can now reset your password.',
-    resetToken,
-  });
-});
-
-// ─────────────────────── FORGOT PASSWORD — Step 3: Set New Password ───────────────────────
-
-export const resetPassword = catchAsync(async (req: Request, res: Response) => {
-  const { resetToken, password } = req.body;
-
-  // Validate the reset JWT from step 2
-  const tokenDoc = await verifyToken(resetToken, TokenType.RESET_PASSWORD);
-  const user = await User.findById(tokenDoc.user).select('+password');
-  if (!user) {
-    throw new ApiError(httpStatus.UNAUTHORIZED, 'User not found');
-  }
-
-  // Apply new password (pre-save hook hashes it)
-  user.password = password;
-  await user.save();
-
-  // Burn the reset token — single-use
-  tokenDoc.blacklisted = true;
-  await tokenDoc.save();
-
-  // Invalidate ALL refresh tokens — forces re-login on all devices (security best practice)
-  await blacklistUserTokens(user._id.toString());
-
-  // Clean up any leftover password reset OTPs (belt-and-suspenders)
-  await invalidateAllOtps(user.email, OtpPurpose.PASSWORD_RESET);
-
-  logger.info(`Password reset successfully for user: ${user.email}`);
-
-  res.status(httpStatus.OK).json({
-    message: 'Password has been reset successfully. Please log in with your new password.',
-  });
+  res.json({ message: 'New security token dispatched.', ...(config.env !== 'production' ? { devOtp: otp } : {}) });
 });
